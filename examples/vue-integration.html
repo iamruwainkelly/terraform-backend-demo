@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terraform Backend Integration Test</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .auth-section, .terraform-section { 
+            border: 1px solid #ddd; 
+            padding: 20px; 
+            margin: 20px 0; 
+            border-radius: 8px; 
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .loading { color: blue; }
+        textarea { width: 100%; height: 200px; font-family: monospace; }
+        button { margin: 5px; padding: 10px 20px; }
+        .log-output { 
+            background: #f5f5f5; 
+            padding: 10px; 
+            height: 300px; 
+            overflow-y: auto; 
+            white-space: pre-wrap; 
+            font-family: monospace; 
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <h1>🚀 Terraform Backend API Test</h1>
+            
+            <!-- Authentication Section -->
+            <div class="auth-section">
+                <h2>Authentication</h2>
+                <div v-if="!token">
+                    <input v-model="username" placeholder="Username" />
+                    <input v-model="password" type="password" placeholder="Password" />
+                    <button @click="login" :disabled="loading">Login</button>
+                </div>
+                <div v-else>
+                    <span class="success">✅ Authenticated as {{ user.username }}</span>
+                    <button @click="logout">Logout</button>
+                </div>
+                <div v-if="authMessage" :class="authMessage.type">{{ authMessage.text }}</div>
+            </div>
+
+            <!-- Terraform Section -->
+            <div class="terraform-section" v-if="token">
+                <h2>Terraform Operations</h2>
+                
+                <h3>Configuration</h3>
+                <textarea v-model="terraformConfig" placeholder="Enter your Terraform configuration..."></textarea>
+                
+                <div>
+                    <button @click="executePlan" :disabled="loading">🔍 Plan</button>
+                    <button @click="executeApply" :disabled="loading">⚡ Apply</button>
+                    <button @click="getJobs">📋 Get Jobs</button>
+                </div>
+
+                <div v-if="currentJobId">
+                    <h3>Job Status: {{ currentJobId }}</h3>
+                    <button @click="getJobStatus" :disabled="loading">🔄 Refresh Status</button>
+                    <button @click="streamJobOutput" :disabled="loading">📡 Stream Output</button>
+                </div>
+
+                <div v-if="jobStatus">
+                    <h4>Status: <span :class="jobStatus.status">{{ jobStatus.status }}</span></h4>
+                    <div v-if="jobStatus.output">
+                        <h4>Output:</h4>
+                        <div class="log-output">{{ jobStatus.output }}</div>
+                    </div>
+                </div>
+
+                <div v-if="streamingLogs">
+                    <h4>Live Output Stream:</h4>
+                    <div class="log-output">{{ streamingLogs }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    // API Configuration
+                    apiUrl: 'http://localhost:3002',
+                    
+                    // Authentication
+                    username: 'admin',
+                    password: 'Admin123!@#',
+                    token: localStorage.getItem('terraform_token'),
+                    user: JSON.parse(localStorage.getItem('terraform_user') || 'null'),
+                    authMessage: null,
+                    
+                    // Terraform
+                    terraformConfig: `provider "local" {
+  # No configuration needed
+}
+
+resource "local_file" "test" {
+  content  = "Hello from Terraform API!"
+  filename = "/tmp/terraform-api-test.txt"
+}
+
+output "message" {
+  value = "Terraform executed successfully!"
+}`,
+                    currentJobId: null,
+                    jobStatus: null,
+                    streamingLogs: '',
+                    eventSource: null,
+                    
+                    // UI State
+                    loading: false
+                };
+            },
+            
+            methods: {
+                async login() {
+                    this.loading = true;
+                    this.authMessage = null;
+                    
+                    try {
+                        const response = await fetch(`${this.apiUrl}/auth/login`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                username: this.username,
+                                password: this.password
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            this.token = data.token;
+                            this.user = data.user;
+                            localStorage.setItem('terraform_token', this.token);
+                            localStorage.setItem('terraform_user', JSON.stringify(this.user));
+                            this.authMessage = { type: 'success', text: 'Login successful!' };
+                        } else {
+                            this.authMessage = { type: 'error', text: data.message || 'Login failed' };
+                        }
+                    } catch (error) {
+                        this.authMessage = { type: 'error', text: 'Network error: ' + error.message };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                logout() {
+                    this.token = null;
+                    this.user = null;
+                    this.currentJobId = null;
+                    this.jobStatus = null;
+                    localStorage.removeItem('terraform_token');
+                    localStorage.removeItem('terraform_user');
+                    if (this.eventSource) {
+                        this.eventSource.close();
+                        this.eventSource = null;
+                    }
+                },
+                
+                async executePlan() {
+                    await this.executeTerraform('plan');
+                },
+                
+                async executeApply() {
+                    await this.executeTerraform('apply');
+                },
+                
+                async executeTerraform(operation) {
+                    this.loading = true;
+                    
+                    try {
+                        const response = await fetch(`${this.apiUrl}/terraform/${operation}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${this.token}`
+                            },
+                            body: JSON.stringify({
+                                config: this.terraformConfig,
+                                variables: {}
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.jobId) {
+                            this.currentJobId = data.jobId;
+                            this.jobStatus = { status: 'running', output: `${operation} started...` };
+                            
+                            // Start streaming output
+                            setTimeout(() => this.streamJobOutput(), 1000);
+                        } else {
+                            this.jobStatus = { 
+                                status: 'error', 
+                                output: data.message || data.error || `${operation} failed` 
+                            };
+                        }
+                    } catch (error) {
+                        this.jobStatus = { status: 'error', output: 'Network error: ' + error.message };
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                
+                async getJobStatus() {
+                    if (!this.currentJobId) return;
+                    
+                    try {
+                        const response = await fetch(`${this.apiUrl}/terraform/status/${this.currentJobId}`, {
+                            headers: { 'Authorization': `Bearer ${this.token}` }
+                        });
+                        
+                        const data = await response.json();
+                        this.jobStatus = data;
+                    } catch (error) {
+                        console.error('Error getting job status:', error);
+                    }
+                },
+                
+                async getJobs() {
+                    try {
+                        const response = await fetch(`${this.apiUrl}/terraform/jobs`, {
+                            headers: { 'Authorization': `Bearer ${this.token}` }
+                        });
+                        
+                        const data = await response.json();
+                        console.log('Jobs:', data.jobs);
+                        alert(`Found ${data.total} jobs. Check console for details.`);
+                    } catch (error) {
+                        console.error('Error getting jobs:', error);
+                    }
+                },
+                
+                streamJobOutput() {
+                    if (!this.currentJobId || this.eventSource) return;
+                    
+                    this.streamingLogs = 'Connecting to stream...\n';
+                    
+                    this.eventSource = new EventSource(
+                        `${this.apiUrl}/terraform/stream/${this.currentJobId}?token=${this.token}`
+                    );
+                    
+                    this.eventSource.onmessage = (event) => {
+                        this.streamingLogs += event.data + '\n';
+                    };
+                    
+                    this.eventSource.onerror = (error) => {
+                        console.error('Stream error:', error);
+                        this.streamingLogs += '\n[Stream connection error]\n';
+                        this.eventSource.close();
+                        this.eventSource = null;
+                    };
+                    
+                    this.eventSource.addEventListener('complete', () => {
+                        this.streamingLogs += '\n[Execution completed]\n';
+                        this.eventSource.close();
+                        this.eventSource = null;
+                        this.getJobStatus(); // Refresh final status
+                    });
+                }
+            },
+            
+            mounted() {
+                // Auto-login if token exists
+                if (this.token && this.user) {
+                    this.authMessage = { type: 'success', text: 'Restored session' };
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

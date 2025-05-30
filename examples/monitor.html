@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terraform Backend API - System Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            color: #333;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            border-left: 5px solid #4CAF50;
+        }
+        .card.warning { border-left-color: #FF9800; }
+        .card.error { border-left-color: #F44336; }
+        .card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4CAF50;
+            display: inline-block;
+        }
+        .status-indicator.warning { background: #FF9800; }
+        .status-indicator.error { background: #F44336; }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .metric:last-child { border-bottom: none; }
+        .metric-label { color: #666; }
+        .metric-value { 
+            font-weight: bold; 
+            color: #333;
+            font-family: 'Courier New', monospace;
+        }
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        .refresh-btn:hover { background: #5a6fd8; }
+        .refresh-btn:disabled { 
+            background: #ccc; 
+            cursor: not-allowed; 
+        }
+        .logs-section {
+            margin-top: 30px;
+            background: #1e1e1e;
+            color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .logs-section h3 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+        }
+        .log-entry {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 3px;
+        }
+        .loading { 
+            display: inline-block;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Terraform Backend API Monitor</h1>
+            <p>Real-time system monitoring and health dashboard</p>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 30px;">
+            <button class="refresh-btn" onclick="refreshAll()" id="refreshBtn">
+                <span id="refreshIcon">🔄</span> Refresh Status
+            </button>
+            <button class="refresh-btn" onclick="toggleAutoRefresh()" id="autoRefreshBtn">
+                🔁 Auto Refresh: OFF
+            </button>
+        </div>
+
+        <div class="status-grid">
+            <!-- Health Status Card -->
+            <div class="card" id="healthCard">
+                <h3>
+                    <span class="status-indicator" id="healthIndicator"></span>
+                    System Health
+                </h3>
+                <div class="metric">
+                    <span class="metric-label">Status:</span>
+                    <span class="metric-value" id="healthStatus">Checking...</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Uptime:</span>
+                    <span class="metric-value" id="uptime">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Version:</span>
+                    <span class="metric-value" id="version">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Environment:</span>
+                    <span class="metric-value" id="environment">-</span>
+                </div>
+            </div>
+
+            <!-- System Resources Card -->
+            <div class="card" id="resourceCard">
+                <h3>
+                    <span class="status-indicator" id="resourceIndicator"></span>
+                    System Resources
+                </h3>
+                <div class="metric">
+                    <span class="metric-label">Memory Used:</span>
+                    <span class="metric-value" id="memoryUsed">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Memory Total:</span>
+                    <span class="metric-value" id="memoryTotal">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Node Version:</span>
+                    <span class="metric-value" id="nodeVersion">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Platform:</span>
+                    <span class="metric-value" id="platform">-</span>
+                </div>
+            </div>
+
+            <!-- Security Status Card -->
+            <div class="card" id="securityCard">
+                <h3>
+                    <span class="status-indicator" id="securityIndicator"></span>
+                    Security Status
+                </h3>
+                <div class="metric">
+                    <span class="metric-label">Rate Limiting:</span>
+                    <span class="metric-value" id="rateLimit">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">CORS:</span>
+                    <span class="metric-value" id="cors">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Helmet (Security):</span>
+                    <span class="metric-value" id="helmet">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">JWT Auth:</span>
+                    <span class="metric-value" id="jwt">-</span>
+                </div>
+            </div>
+
+            <!-- API Status Card -->
+            <div class="card" id="apiCard">
+                <h3>
+                    <span class="status-indicator" id="apiIndicator"></span>
+                    API Status
+                </h3>
+                <div class="metric">
+                    <span class="metric-label">Health Endpoint:</span>
+                    <span class="metric-value" id="healthEndpoint">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Auth Endpoint:</span>
+                    <span class="metric-value" id="authEndpoint">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Terraform Endpoint:</span>
+                    <span class="metric-value" id="terraformEndpoint">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Response Time:</span>
+                    <span class="metric-value" id="responseTime">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="logs-section">
+            <h3>📊 System Logs</h3>
+            <div id="systemLogs">
+                <div class="log-entry">System monitoring initialized...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3002';
+        let autoRefreshInterval = null;
+        let autoRefreshEnabled = false;
+
+        function log(message) {
+            const logsContainer = document.getElementById('systemLogs');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logsContainer.appendChild(logEntry);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
+        function updateIndicator(elementId, status) {
+            const indicator = document.getElementById(elementId);
+            indicator.className = `status-indicator ${status}`;
+        }
+
+        function formatUptime(seconds) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours}h ${minutes}m ${secs}s`;
+        }
+
+        async function checkHealth() {
+            const startTime = Date.now();
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                const responseTime = Date.now() - startTime;
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Update health card
+                    document.getElementById('healthStatus').textContent = data.status;
+                    document.getElementById('uptime').textContent = formatUptime(data.uptime);
+                    document.getElementById('version').textContent = data.version;
+                    document.getElementById('environment').textContent = data.environment;
+                    document.getElementById('responseTime').textContent = `${responseTime}ms`;
+                    
+                    updateIndicator('healthIndicator', 'success');
+                    updateIndicator('apiIndicator', 'success');
+                    
+                    log(`Health check successful - ${data.status} (${responseTime}ms)`);
+                    return true;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                document.getElementById('healthStatus').textContent = 'Error';
+                updateIndicator('healthIndicator', 'error');
+                updateIndicator('apiIndicator', 'error');
+                log(`Health check failed: ${error.message}`);
+                return false;
+            }
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch(`${API_URL}/status`);
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Update resource card
+                    document.getElementById('memoryUsed').textContent = data.system.memory.used;
+                    document.getElementById('memoryTotal').textContent = data.system.memory.total;
+                    document.getElementById('nodeVersion').textContent = data.system.nodeVersion;
+                    document.getElementById('platform').textContent = `${data.system.platform} (${data.system.arch})`;
+                    
+                    // Update security card
+                    document.getElementById('rateLimit').textContent = data.security.rateLimitActive ? '✅ Active' : '❌ Inactive';
+                    document.getElementById('cors').textContent = data.security.corsEnabled ? '✅ Enabled' : '❌ Disabled';
+                    document.getElementById('helmet').textContent = data.security.helmetEnabled ? '✅ Enabled' : '❌ Disabled';
+                    document.getElementById('jwt').textContent = data.security.jwtRequired ? '✅ Required' : '❌ Optional';
+                    
+                    updateIndicator('resourceIndicator', 'success');
+                    updateIndicator('securityIndicator', 'success');
+                    
+                    log('System status updated successfully');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                updateIndicator('resourceIndicator', 'error');
+                updateIndicator('securityIndicator', 'error');
+                log(`Status check failed: ${error.message}`);
+            }
+        }
+
+        async function checkEndpoints() {
+            const endpoints = [
+                { name: 'Health', url: '/health', elementId: 'healthEndpoint' },
+                { name: 'Auth', url: '/auth/validate', elementId: 'authEndpoint' },
+                { name: 'Terraform', url: '/terraform/jobs', elementId: 'terraformEndpoint' }
+            ];
+
+            for (const endpoint of endpoints) {
+                try {
+                    const response = await fetch(`${API_URL}${endpoint.url}`);
+                    const status = response.ok ? '✅ Online' : `❌ HTTP ${response.status}`;
+                    document.getElementById(endpoint.elementId).textContent = status;
+                } catch (error) {
+                    document.getElementById(endpoint.elementId).textContent = '❌ Offline';
+                }
+            }
+        }
+
+        async function refreshAll() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const refreshIcon = document.getElementById('refreshIcon');
+            
+            refreshBtn.disabled = true;
+            refreshIcon.className = 'loading';
+            refreshIcon.textContent = '⭕';
+            
+            log('Starting system refresh...');
+            
+            try {
+                await Promise.all([
+                    checkHealth(),
+                    checkStatus(),
+                    checkEndpoints()
+                ]);
+                log('System refresh completed successfully');
+            } catch (error) {
+                log(`System refresh failed: ${error.message}`);
+            } finally {
+                refreshBtn.disabled = false;
+                refreshIcon.className = '';
+                refreshIcon.textContent = '🔄';
+            }
+        }
+
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('autoRefreshBtn');
+            
+            if (autoRefreshEnabled) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshEnabled = false;
+                btn.textContent = '🔁 Auto Refresh: OFF';
+                log('Auto refresh disabled');
+            } else {
+                autoRefreshInterval = setInterval(refreshAll, 10000); // Every 10 seconds
+                autoRefreshEnabled = true;
+                btn.textContent = '🔁 Auto Refresh: ON';
+                log('Auto refresh enabled (10s interval)');
+            }
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            log('System monitor initialized');
+            refreshAll();
+        });
+    </script>
+</body>
+</html>
