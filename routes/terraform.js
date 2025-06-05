@@ -76,6 +76,7 @@ provider "aws" {
 // Execute Docker command with timeout and security
 const executeDockerCommand = (command, tempDir, timeout = 60000) => {
   return new Promise((resolve, reject) => {
+    // Try Docker first, fallback to local Terraform
     const dockerCommand = `docker run --rm \
       -v "${tempDir}:/workspace" \
       -w /workspace \
@@ -114,7 +115,70 @@ const executeDockerCommand = (command, tempDir, timeout = 60000) => {
       if (code === 0) {
         resolve({ stdout, stderr, exitCode: code });
       } else {
-        reject(new Error(`Command failed with exit code ${code}: ${stderr}`));
+        // If Docker fails, try local Terraform
+        if (stderr.includes('docker: command not found') || stderr.includes('Cannot connect to the Docker daemon')) {
+          logger.info('Docker not available, falling back to local Terraform');
+          executeLocalTerraform(command, tempDir, timeout)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          reject(new Error(`Command failed with exit code ${code}: ${stderr}`));
+        }
+      }
+    });
+    
+    child.on('error', (error) => {
+      // If Docker command fails to start, try local Terraform
+      if (error.code === 'ENOENT') {
+        logger.info('Docker not available, falling back to local Terraform');
+        executeLocalTerraform(command, tempDir, timeout)
+          .then(resolve)
+          .catch(reject);
+      } else {
+        reject(error);
+      }
+    });
+  });
+};
+
+// Execute local Terraform command as fallback
+const executeLocalTerraform = (command, tempDir, timeout = 60000) => {
+  return new Promise((resolve, reject) => {
+    const localCommand = `cd "${tempDir}" && terraform ${command}`;
+    
+    logger.info('Executing local Terraform command', { 
+      command: localCommand,
+      tempDir: path.basename(tempDir),
+      timeout 
+    });
+    
+    const child = exec(localCommand, {
+      timeout,
+      maxBuffer: 1024 * 1024 * 10, // 10MB buffer
+      env: {
+        ...process.env,
+        AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+        AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+        AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION
+      }
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    child.stdout.on('data', (data) => {
+      stdout += data;
+    });
+    
+    child.stderr.on('data', (data) => {
+      stderr += data;
+    });
+    
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr, exitCode: code });
+      } else {
+        reject(new Error(`Local Terraform failed with exit code ${code}: ${stderr}`));
       }
     });
     
@@ -125,7 +189,7 @@ const executeDockerCommand = (command, tempDir, timeout = 60000) => {
 };
 
 // Stream command output using Server-Sent Events
-const streamCommandOutput = (res, command, tempDir, jobId) => {
+const streamCommandOutput = (req, res, command, tempDir, jobId) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -256,12 +320,12 @@ router.post('/plan', validateTerraformConfig, async (req, res) => {
     const tempDir = await createTerraformWorkspace(jobId, config, variables);
     jobs.get(jobId).tempDir = tempDir;
     
-    // Initialize Terraform first
+    // Initialize Terraform first (increased timeout for provider downloads)
     logger.info('Initializing Terraform', { jobId });
-    await executeDockerCommand('init -no-color', tempDir, 30000);
+    await executeDockerCommand('init -no-color', tempDir, 120000);
     
     // Stream the plan output
-    streamCommandOutput(res, 'plan -no-color -detailed-exitcode', tempDir, jobId);
+    streamCommandOutput(req, res, 'plan -no-color -detailed-exitcode', tempDir, jobId);
     
   } catch (error) {
     logger.error('Terraform plan error', { 
@@ -325,12 +389,12 @@ router.post('/apply', validateTerraformConfig, async (req, res) => {
     const tempDir = await createTerraformWorkspace(jobId, config, variables);
     jobs.get(jobId).tempDir = tempDir;
     
-    // Initialize Terraform first
+    // Initialize Terraform first (increased timeout for provider downloads)
     logger.info('Initializing Terraform', { jobId });
-    await executeDockerCommand('init -no-color', tempDir, 30000);
+    await executeDockerCommand('init -no-color', tempDir, 120000);
     
     // Stream the apply output
-    streamCommandOutput(res, 'apply -auto-approve -no-color', tempDir, jobId);
+    streamCommandOutput(req, res, 'apply -auto-approve -no-color', tempDir, jobId);
     
   } catch (error) {
     logger.error('Terraform apply error', { 

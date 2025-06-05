@@ -24,20 +24,22 @@ const loginSchema = Joi.object({
   password: Joi.string().required()
 });
 
-// Input sanitization
+// Input sanitization for Terraform configs - less aggressive
 const sanitizeInput = (input) => {
   if (typeof input !== 'string') return input;
   
-  // Remove potentially dangerous characters and commands
+  // Only remove truly dangerous command injection patterns
+  // Keep Terraform syntax characters like {}, (), $, etc.
   const dangerous = [
-    ';', '&&', '||', '`', '$', '(', ')', '{', '}', '[', ']',
-    'rm', 'sudo', 'su', 'chmod', 'chown', 'wget', 'curl',
-    'eval', 'exec', 'system', 'shell_exec', 'passthru'
+    /;\s*(rm|sudo|su|chmod|chown|wget|curl|eval|exec|system|shell_exec|passthru)/gi,
+    /&&\s*(rm|sudo|su|chmod|chown|wget|curl|eval|exec|system|shell_exec|passthru)/gi,
+    /\|\|\s*(rm|sudo|su|chmod|chown|wget|curl|eval|exec|system|shell_exec|passthru)/gi,
+    /`[^`]*`/g, // Remove backticks (command substitution)
   ];
   
   let sanitized = input;
-  dangerous.forEach(char => {
-    sanitized = sanitized.replace(new RegExp(char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
+  dangerous.forEach(pattern => {
+    sanitized = sanitized.replace(pattern, '');
   });
   
   return sanitized.trim();
