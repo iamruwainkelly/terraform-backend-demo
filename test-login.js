@@ -12,7 +12,7 @@ const testLogin = (username, password) => {
   const options = {
     hostname: 'localhost',
     port: 3003,
-    path: '/api/auth/login',
+    path: '/auth/login',
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -76,8 +76,8 @@ const testHealth = () => {
         
         // Test login after health check passes
         console.log('\n=== Testing Login ===');
-        console.log('Testing with admin / Admin123!@#');
-        testLogin('admin', 'Admin123!@#');
+        console.log('Testing with admin / Admin123!@');
+        testLogin('admin', 'Admin123!@');
       } else {
         console.log('❌ Backend health check failed');
       }

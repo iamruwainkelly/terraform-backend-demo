@@ -72,7 +72,7 @@ Login and receive JWT token.
 ```json
 {
   "username": "admin",
-  "password": "Admin123!@#"
+  "password": "Admin123!@"
 }
 ```
 
@@ -191,7 +191,7 @@ List all jobs for current user.
 ### Default Users
 
 - **Username**: `admin`
-- **Password**: `Admin123!@#` (change in production!)
+- **Password**: `Admin123!@` (change in production!)
 - **Role**: `admin`
 
 ## 🛡️ Security Best Practices
@@ -401,7 +401,7 @@ npm test
 # Test authentication
 curl -X POST http://localhost:3001/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"Admin123!@#"}'
+  -d '{"username":"admin","password":"Admin123!@"}'
 
 # Test Terraform plan
 curl -X POST http://localhost:3001/terraform/plan \
