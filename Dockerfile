@@ -30,7 +30,7 @@ USER nodeapp
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "const http = require('http'); \
-    const options = { host: 'localhost', port: process.env.PORT || 3001, path: '/health', timeout: 2000 }; \
+    const options = { host: 'localhost', port: process.env.PORT || 3000, path: '/health', timeout: 2000 }; \
     const req = http.request(options, (res) => { \
       if (res.statusCode === 200) process.exit(0); else process.exit(1); \
     }); \
@@ -38,7 +38,7 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     req.end();"
 
 # Expose port
-EXPOSE 3001
+EXPOSE ${PORT:-3000}
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]

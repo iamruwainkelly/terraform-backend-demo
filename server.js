@@ -18,7 +18,7 @@ const logger = require('./utils/logger');
 const { validateConfig } = require('./utils/validation');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 // Create necessary directories
 const requiredDirs = ['logs', 'temp', 'uploads'];
@@ -213,11 +213,12 @@ process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
 
 // Start server
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🚀 Terraform Backend API running on port ${PORT}`, {
     environment: process.env.NODE_ENV,
     nodeVersion: process.version,
-    pid: process.pid
+    pid: process.pid,
+    host: '0.0.0.0'
   });
 });
 
